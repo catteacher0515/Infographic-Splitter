@@ -55,6 +55,17 @@ def _clamp_box(
     }
 
 
+def _is_contour_candidate(width: int, height: int, raw_area: int, min_area: int) -> bool:
+    if raw_area >= min_area:
+        return True
+
+    small_stroke_floor = max(80, int(min_area * 0.20))
+    if raw_area < small_stroke_floor:
+        return False
+
+    return max(width, height) >= 20 and min(width, height) <= 18
+
+
 def _box_bounds(box: dict) -> tuple[int, int, int, int]:
     x1 = int(box["x"])
     y1 = int(box["y"])
@@ -63,13 +74,30 @@ def _box_bounds(box: dict) -> tuple[int, int, int, int]:
     return x1, y1, x2, y2
 
 
+def _raw_box_bounds(box: dict) -> tuple[int, int, int, int]:
+    if "raw_x" not in box:
+        return _box_bounds(box)
+
+    x1 = int(box["raw_x"])
+    y1 = int(box["raw_y"])
+    x2 = x1 + int(box["raw_width"])
+    y2 = y1 + int(box["raw_height"])
+    return x1, y1, x2, y2
+
+
 def _merged_box(first: dict, second: dict) -> dict:
     first_x1, first_y1, first_x2, first_y2 = _box_bounds(first)
     second_x1, second_y1, second_x2, second_y2 = _box_bounds(second)
+    first_raw_x1, first_raw_y1, first_raw_x2, first_raw_y2 = _raw_box_bounds(first)
+    second_raw_x1, second_raw_y1, second_raw_x2, second_raw_y2 = _raw_box_bounds(second)
     x1 = min(first_x1, second_x1)
     y1 = min(first_y1, second_y1)
     x2 = max(first_x2, second_x2)
     y2 = max(first_y2, second_y2)
+    raw_x1 = min(first_raw_x1, second_raw_x1)
+    raw_y1 = min(first_raw_y1, second_raw_y1)
+    raw_x2 = max(first_raw_x2, second_raw_x2)
+    raw_y2 = max(first_raw_y2, second_raw_y2)
     width = x2 - x1
     height = y2 - y1
     return {
@@ -78,6 +106,14 @@ def _merged_box(first: dict, second: dict) -> dict:
         "width": width,
         "height": height,
         "area": width * height,
+        "raw_x": raw_x1,
+        "raw_y": raw_y1,
+        "raw_width": raw_x2 - raw_x1,
+        "raw_height": raw_y2 - raw_y1,
+        "content_area": int(first.get("content_area", first["area"]))
+        + int(second.get("content_area", second["area"])),
+        "has_horizontal_small_stroke": bool(first.get("has_horizontal_small_stroke", False))
+        or bool(second.get("has_horizontal_small_stroke", False)),
     }
 
 
@@ -95,23 +131,42 @@ def _should_merge_boxes(
     merge_gap: int,
     image_width: int,
     image_height: int,
+    min_area: int,
 ) -> bool:
     first_x1, first_y1, first_x2, first_y2 = _box_bounds(first)
     second_x1, second_y1, second_x2, second_y2 = _box_bounds(second)
+    first_raw_x1, first_raw_y1, first_raw_x2, first_raw_y2 = _raw_box_bounds(first)
+    second_raw_x1, second_raw_y1, second_raw_x2, second_raw_y2 = _raw_box_bounds(second)
     x_gap = _axis_gap(first_x1, first_x2, second_x1, second_x2)
     y_gap = _axis_gap(first_y1, first_y2, second_y1, second_y2)
-    distance_limit = max(1, int(merge_gap) * 2)
+    raw_y_gap = _axis_gap(first_raw_y1, first_raw_y2, second_raw_y1, second_raw_y2)
+    merged = _merged_box(first, second)
+    has_horizontal_small_stroke = (
+        bool(first.get("has_horizontal_small_stroke", False))
+        or bool(second.get("has_horizontal_small_stroke", False))
+    )
+    if has_horizontal_small_stroke and raw_y_gap != 0:
+        return False
+
+    is_short_text_like = merged["height"] < 90
+    distance_multiplier = 3 if is_short_text_like else 2
+    distance_limit = max(1, int(merge_gap) * distance_multiplier)
 
     if x_gap > distance_limit or y_gap > distance_limit:
         return False
 
-    merged = _merged_box(first, second)
     merged_aspect = merged["width"] / max(1, merged["height"])
-    is_horizontal_chain = x_gap > 0 and y_gap == 0 and merged_aspect > 2.8
+    is_horizontal_chain = (
+        x_gap > 0
+        and y_gap == 0
+        and merged_aspect > 2.8
+        and not is_short_text_like
+    )
     if is_horizontal_chain:
         return False
 
-    max_merged_width = min(image_width * 0.60, 650)
+    width_ratio_limit = 0.80 if is_short_text_like else 0.60
+    max_merged_width = min(image_width * width_ratio_limit, 650)
     if merged["width"] > max_merged_width:
         return False
     if merged["height"] > image_height * 0.45:
@@ -124,6 +179,7 @@ def merge_nearby_boxes(
     merge_gap: int,
     image_width: int,
     image_height: int,
+    min_area: int = 500,
 ) -> list[dict]:
     merged_boxes = list(boxes)
     changed = True
@@ -143,7 +199,14 @@ def merge_nearby_boxes(
                 if used[other_index]:
                     continue
                 other = merged_boxes[other_index]
-                if _should_merge_boxes(current, other, merge_gap, image_width, image_height):
+                if _should_merge_boxes(
+                    current,
+                    other,
+                    merge_gap,
+                    image_width,
+                    image_height,
+                    min_area,
+                ):
                     current = _merged_box(current, other)
                     used[other_index] = True
                     changed = True
@@ -188,6 +251,7 @@ def detect_elements(
     merge_gap: int = 8,
     padding: int = 10,
 ) -> list[dict]:
+    min_area = int(min_area)
     gray = _to_cv_gray(image)
     binary = _threshold_and_invert(gray)
     merged = _merge_strokes(binary, merge_gap)
@@ -203,19 +267,31 @@ def detect_elements(
     for contour in contours:
         x, y, width, height = cv2.boundingRect(contour)
         raw_area = width * height
-        if raw_area < int(min_area):
+        if not _is_contour_candidate(width, height, raw_area, min_area):
             continue
-        boxes.append(
-            _clamp_box(
-                x,
-                y,
-                width,
-                height,
-                image_width,
-                image_height,
-                padding,
-            )
+        box = _clamp_box(
+            x,
+            y,
+            width,
+            height,
+            image_width,
+            image_height,
+            padding,
         )
+        box["content_area"] = int(raw_area)
+        box["raw_x"] = int(x)
+        box["raw_y"] = int(y)
+        box["raw_width"] = int(width)
+        box["raw_height"] = int(height)
+        box["has_horizontal_small_stroke"] = (
+            raw_area < min_area and width >= 20 and height <= 18
+        )
+        boxes.append(box)
 
-    boxes = merge_nearby_boxes(boxes, merge_gap, image_width, image_height)
+    boxes = merge_nearby_boxes(boxes, merge_gap, image_width, image_height, min_area)
+    boxes = [
+        box
+        for box in boxes
+        if int(box.get("content_area", box["area"])) >= min_area
+    ]
     return sort_boxes(boxes)

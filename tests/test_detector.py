@@ -72,6 +72,61 @@ def test_merge_gap_rejects_wide_horizontal_chain_merge():
     assert len(boxes) == 3
 
 
+def test_merge_gap_allows_wide_short_text_line_merge():
+    image = make_canvas(width=420, height=140)
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((30, 50, 70, 90), outline="black", width=4)
+    draw.rectangle((96, 52, 170, 88), outline="black", width=4)
+    draw.rectangle((196, 52, 290, 88), outline="black", width=4)
+
+    boxes = detect_elements(image, min_area=200, merge_gap=24, padding=0)
+
+    assert len(boxes) == 1
+    assert boxes[0]["width"] >= 255
+    assert boxes[0]["height"] < 70
+
+
+def test_small_text_stroke_can_merge_before_min_area_filter():
+    image = make_canvas(width=260, height=120)
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((24, 58, 54, 64), fill="black")
+    draw.rectangle((82, 42, 150, 82), outline="black", width=4)
+
+    boxes = detect_elements(image, min_area=500, merge_gap=16, padding=0)
+
+    assert len(boxes) == 1
+    assert boxes[0]["x"] <= 26
+    assert boxes[0]["width"] >= 126
+
+
+def test_small_text_stroke_can_merge_when_padding_overlaps_boxes():
+    image = make_canvas(width=260, height=180)
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((24, 58, 54, 64), fill="black")
+    draw.rectangle((62, 42, 132, 82), outline="black", width=4)
+
+    boxes = detect_elements(image, min_area=500, merge_gap=8, padding=10)
+
+    assert len(boxes) == 1
+    assert boxes[0]["x"] <= 16
+    assert boxes[0]["width"] >= 125
+
+
+def test_small_stroke_does_not_bridge_large_block_to_text():
+    image = make_canvas(width=300, height=260)
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((40, 20, 180, 110), outline="black", width=4)
+    draw.rectangle((98, 126, 140, 132), fill="black")
+    draw.rectangle((98, 142, 140, 148), fill="black")
+    draw.rectangle((72, 160, 170, 200), outline="black", width=4)
+
+    boxes = detect_elements(image, min_area=500, merge_gap=8, padding=10)
+
+    assert len(boxes) == 2
+    assert boxes[0]["height"] < 120
+    assert boxes[1]["height"] < 70
+
+
 def test_padding_expands_box_and_clamps_to_image_bounds():
     image = make_canvas(width=120, height=100)
     draw = ImageDraw.Draw(image)
