@@ -76,3 +76,48 @@ def run_export(rows, elements: list[dict], output_root: str | Path = OUTPUT_ROOT
     session_dir = build_session_output_dir(output_root)
     updated_elements = rows_to_elements(rows, elements)
     return export_zip(updated_elements, session_dir)
+
+
+def build_app():
+    import gradio as gr
+
+    with gr.Blocks(title="Infographic Splitter") as demo:
+        gr.Markdown("# Infographic Splitter")
+
+        state_elements = gr.State([])
+
+        with gr.Row():
+            with gr.Column(scale=1):
+                image_input = gr.Image(type="pil", label="上传图片")
+                min_area = gr.Number(value=500, precision=0, label="min_area")
+                merge_gap = gr.Slider(1, 40, value=8, step=1, label="merge_gap")
+                padding = gr.Slider(0, 40, value=10, step=1, label="padding")
+                split_button = gr.Button("开始拆分", variant="primary")
+                export_button = gr.Button("导出 ZIP")
+                zip_output = gr.File(label="下载 ZIP")
+
+            with gr.Column(scale=2):
+                gallery = gr.Gallery(label="拆分结果", columns=4, height=360)
+                table = gr.Dataframe(
+                    headers=["selected", "file", "x", "y", "width", "height"],
+                    datatype=["bool", "str", "number", "number", "number", "number"],
+                    interactive=True,
+                    label="元素列表",
+                )
+
+        split_button.click(
+            fn=run_split,
+            inputs=[image_input, min_area, merge_gap, padding],
+            outputs=[gallery, table, state_elements],
+        )
+        export_button.click(
+            fn=run_export,
+            inputs=[table, state_elements],
+            outputs=[zip_output],
+        )
+
+    return demo
+
+
+if __name__ == "__main__":
+    build_app().launch()
