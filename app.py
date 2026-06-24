@@ -5,9 +5,17 @@ from uuid import uuid4
 
 from PIL import Image
 
+from ai_grouper import (
+    build_grouped_boxes,
+    build_grouping_messages,
+    parse_grouping_response,
+    validate_grouping_response,
+)
+from annotator import image_to_data_url, save_annotated_candidates
 from detector import detect_elements
 from exporter import export_zip
 from splitter import create_elements
+from vision_client import QwenVisionClient
 
 
 OUTPUT_ROOT = Path("output")
@@ -28,6 +36,9 @@ def elements_to_rows(elements: list[dict]) -> list[list]:
             element["y"],
             element["width"],
             element["height"],
+            element.get("type", ""),
+            ",".join(str(item) for item in element.get("source_candidate_ids", [])),
+            element.get("reason", ""),
         ]
         for element in elements
     ]
@@ -78,6 +89,51 @@ def run_export(rows, elements: list[dict], output_root: str | Path = OUTPUT_ROOT
     return export_zip(updated_elements, session_dir)
 
 
+def run_ai_grouping(
+    image: Image.Image,
+    elements: list[dict],
+    output_root: str | Path = OUTPUT_ROOT,
+    vision_client: QwenVisionClient | None = None,
+) -> tuple[list[str], list[list], list[dict], str]:
+    if image is None:
+        return [], [], [], "请先上传图片"
+    if not elements:
+        return [], [], [], "请先点击开始拆分"
+
+    session_dir = build_session_output_dir(output_root)
+    annotated_path = save_annotated_candidates(
+        image,
+        elements,
+        session_dir / "annotated_candidates.png",
+    )
+    messages = build_grouping_messages(
+        candidates=elements,
+        annotated_image_data_url=image_to_data_url(annotated_path),
+    )
+
+    try:
+        client = vision_client or QwenVisionClient()
+        raw_response = client.complete(messages)
+        parsed = parse_grouping_response(raw_response)
+        grouping = validate_grouping_response(parsed, elements)
+        grouped_boxes = build_grouped_boxes(grouping, elements)
+        grouped_elements = create_elements(image, grouped_boxes, session_dir)
+    except Exception as error:
+        return (
+            [element["preview_path"] for element in elements],
+            elements_to_rows(elements),
+            elements,
+            f"AI 语义合并失败：{error}",
+        )
+
+    return (
+        [element["preview_path"] for element in grouped_elements],
+        elements_to_rows(grouped_elements),
+        grouped_elements,
+        "AI 语义合并完成",
+    )
+
+
 def build_app():
     import gradio as gr
 
@@ -85,6 +141,7 @@ def build_app():
         gr.Markdown("# Infographic Splitter")
 
         state_elements = gr.State([])
+        ai_status = gr.Markdown("")
 
         with gr.Row():
             with gr.Column(scale=1):
@@ -93,14 +150,35 @@ def build_app():
                 merge_gap = gr.Slider(1, 40, value=8, step=1, label="merge_gap")
                 padding = gr.Slider(0, 40, value=10, step=1, label="padding")
                 split_button = gr.Button("开始拆分", variant="primary")
+                ai_button = gr.Button("AI 语义合并")
                 export_button = gr.Button("导出 ZIP")
                 zip_output = gr.File(label="下载 ZIP")
 
             with gr.Column(scale=2):
                 gallery = gr.Gallery(label="拆分结果", columns=4, height=360)
                 table = gr.Dataframe(
-                    headers=["selected", "file", "x", "y", "width", "height"],
-                    datatype=["bool", "str", "number", "number", "number", "number"],
+                    headers=[
+                        "selected",
+                        "file",
+                        "x",
+                        "y",
+                        "width",
+                        "height",
+                        "type",
+                        "source_candidate_ids",
+                        "reason",
+                    ],
+                    datatype=[
+                        "bool",
+                        "str",
+                        "number",
+                        "number",
+                        "number",
+                        "number",
+                        "str",
+                        "str",
+                        "str",
+                    ],
                     interactive=True,
                     label="元素列表",
                 )
@@ -109,6 +187,11 @@ def build_app():
             fn=run_split,
             inputs=[image_input, min_area, merge_gap, padding],
             outputs=[gallery, table, state_elements],
+        )
+        ai_button.click(
+            fn=run_ai_grouping,
+            inputs=[image_input, state_elements],
+            outputs=[gallery, table, state_elements, ai_status],
         )
         export_button.click(
             fn=run_export,

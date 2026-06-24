@@ -2,7 +2,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from app import build_session_output_dir, run_split
+from app import build_session_output_dir, elements_to_rows, run_ai_grouping, run_split
 
 
 def test_build_session_output_dir_creates_unique_session(tmp_path: Path):
@@ -32,3 +32,48 @@ def test_run_split_returns_gallery_rows_and_elements(tmp_path: Path):
     assert len(elements) == 1
     assert rows[0][0] is True
     assert rows[0][1] == "element_001.png"
+
+
+def test_elements_to_rows_includes_ai_metadata():
+    rows = elements_to_rows(
+        [
+            {
+                "selected": True,
+                "file": "loop_cycle.png",
+                "x": 10,
+                "y": 20,
+                "width": 90,
+                "height": 70,
+                "type": "illustration",
+                "source_candidate_ids": [1, 2],
+                "reason": "same loop",
+            }
+        ]
+    )
+
+    assert rows[0] == [
+        True,
+        "loop_cycle.png",
+        10,
+        20,
+        90,
+        70,
+        "illustration",
+        "1,2",
+        "same loop",
+    ]
+
+
+def test_run_ai_grouping_returns_error_without_elements(tmp_path: Path):
+    image = Image.new("RGB", (100, 100), "white")
+
+    gallery, rows, elements, status = run_ai_grouping(
+        image=image,
+        elements=[],
+        output_root=tmp_path,
+    )
+
+    assert gallery == []
+    assert rows == []
+    assert elements == []
+    assert "先点击开始拆分" in status
