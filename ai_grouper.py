@@ -106,3 +106,72 @@ def extract_json_object(text: str) -> dict:
 
 def parse_grouping_response(text: str) -> dict:
     return extract_json_object(text)
+
+
+ALLOWED_TYPES = {"title", "label", "illustration", "symbol", "arrow", "unknown"}
+
+
+def _clean_group_file(filename: object, fallback_id: int) -> str:
+    name = str(filename or "").strip().lower().replace("-", "_").replace(" ", "_")
+    name = re.sub(r"[^a-z0-9._]+", "_", name).strip("._")
+    if not name:
+        name = f"ai_group_{fallback_id:03d}"
+    if not name.endswith(".png"):
+        name = f"{name}.png"
+    return name
+
+
+def validate_grouping_response(response: dict, candidates: list[dict]) -> dict:
+    valid_candidate_ids = {int(candidate["id"]) for candidate in candidates}
+    used_candidate_ids: set[int] = set()
+    groups = []
+
+    for fallback_id, group in enumerate(response.get("groups", []), start=1):
+        if not isinstance(group, dict):
+            continue
+
+        candidate_ids = []
+        for raw_id in group.get("candidate_ids", []):
+            try:
+                candidate_id = int(raw_id)
+            except (TypeError, ValueError):
+                continue
+            if candidate_id not in valid_candidate_ids:
+                continue
+            if candidate_id in used_candidate_ids:
+                continue
+            candidate_ids.append(candidate_id)
+
+        if not candidate_ids:
+            continue
+
+        used_candidate_ids.update(candidate_ids)
+        group_type = str(group.get("type", "unknown")).strip().lower()
+        if group_type not in ALLOWED_TYPES:
+            group_type = "unknown"
+
+        groups.append(
+            {
+                "id": int(group.get("id") or len(groups) + 1),
+                "file": _clean_group_file(group.get("file"), fallback_id),
+                "candidate_ids": candidate_ids,
+                "type": group_type,
+                "keep": bool(group.get("keep", True)),
+                "reason": str(group.get("reason", "")),
+            }
+        )
+
+    ignored_candidate_ids = []
+    for raw_id in response.get("ignored_candidate_ids", []):
+        try:
+            candidate_id = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        if candidate_id in valid_candidate_ids and candidate_id not in used_candidate_ids:
+            ignored_candidate_ids.append(candidate_id)
+
+    return {
+        "groups": groups,
+        "ignored_candidate_ids": ignored_candidate_ids,
+        "notes": str(response.get("notes", "")),
+    }
