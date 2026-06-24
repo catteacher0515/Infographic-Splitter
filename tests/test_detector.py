@@ -59,6 +59,18 @@ def test_merge_gap_keeps_distant_blocks_separate():
     assert boxes[0]["x"] < boxes[1]["x"]
 
 
+def test_merge_gap_rejects_wide_horizontal_chain_merge():
+    image = make_canvas(width=1000, height=260)
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((40, 80, 170, 180), outline="black", width=4)
+    draw.rectangle((210, 84, 340, 176), outline="black", width=4)
+    draw.rectangle((380, 82, 510, 178), outline="black", width=4)
+
+    boxes = detect_elements(image, min_area=200, merge_gap=24, padding=0)
+
+    assert len(boxes) == 3
+
+
 def test_padding_expands_box_and_clamps_to_image_bounds():
     image = make_canvas(width=120, height=100)
     draw = ImageDraw.Draw(image)

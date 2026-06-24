@@ -105,6 +105,11 @@ def _should_merge_boxes(
         return False
 
     merged = _merged_box(first, second)
+    merged_aspect = merged["width"] / max(1, merged["height"])
+    is_horizontal_chain = x_gap > 0 and y_gap == 0 and merged_aspect > 2.8
+    if is_horizontal_chain:
+        return False
+
     if merged["width"] > image_width * 0.60:
         return False
     if merged["height"] > image_height * 0.45:
