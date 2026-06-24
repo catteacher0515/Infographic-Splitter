@@ -1,4 +1,5 @@
 from PIL import Image, ImageDraw
+import pytest
 
 from detector import detect_elements, sort_boxes
 
@@ -99,3 +100,15 @@ def test_sort_boxes_uses_row_then_column_order():
         (200, 20),
         (20, 120),
     ]
+
+
+def test_reference_overview_does_not_create_cross_column_visual_block():
+    image_path = "/Users/huapingyu/Desktop/手绘视频/ AI 发展四个阶段/总览图.png"
+    try:
+        image = Image.open(image_path).convert("RGB")
+    except FileNotFoundError:
+        pytest.skip("local reference image is not available")
+
+    boxes = detect_elements(image, min_area=500, merge_gap=8, padding=10)
+
+    assert max(box["width"] for box in boxes) < 650

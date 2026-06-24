@@ -25,7 +25,8 @@ def _threshold_and_invert(gray: np.ndarray) -> np.ndarray:
 
 def _merge_strokes(binary: np.ndarray, merge_gap: int) -> np.ndarray:
     gap = max(1, int(merge_gap))
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (gap, gap))
+    close_gap = max(1, gap // 2)
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (close_gap, close_gap))
     return cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
 
 
@@ -110,7 +111,8 @@ def _should_merge_boxes(
     if is_horizontal_chain:
         return False
 
-    if merged["width"] > image_width * 0.60:
+    max_merged_width = min(image_width * 0.60, 650)
+    if merged["width"] > max_merged_width:
         return False
     if merged["height"] > image_height * 0.45:
         return False
