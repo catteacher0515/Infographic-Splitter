@@ -54,6 +54,100 @@ def _clamp_box(
     }
 
 
+def _box_bounds(box: dict) -> tuple[int, int, int, int]:
+    x1 = int(box["x"])
+    y1 = int(box["y"])
+    x2 = x1 + int(box["width"])
+    y2 = y1 + int(box["height"])
+    return x1, y1, x2, y2
+
+
+def _merged_box(first: dict, second: dict) -> dict:
+    first_x1, first_y1, first_x2, first_y2 = _box_bounds(first)
+    second_x1, second_y1, second_x2, second_y2 = _box_bounds(second)
+    x1 = min(first_x1, second_x1)
+    y1 = min(first_y1, second_y1)
+    x2 = max(first_x2, second_x2)
+    y2 = max(first_y2, second_y2)
+    width = x2 - x1
+    height = y2 - y1
+    return {
+        "x": x1,
+        "y": y1,
+        "width": width,
+        "height": height,
+        "area": width * height,
+    }
+
+
+def _axis_gap(first_start: int, first_end: int, second_start: int, second_end: int) -> int:
+    if first_end < second_start:
+        return second_start - first_end
+    if second_end < first_start:
+        return first_start - second_end
+    return 0
+
+
+def _should_merge_boxes(
+    first: dict,
+    second: dict,
+    merge_gap: int,
+    image_width: int,
+    image_height: int,
+) -> bool:
+    first_x1, first_y1, first_x2, first_y2 = _box_bounds(first)
+    second_x1, second_y1, second_x2, second_y2 = _box_bounds(second)
+    x_gap = _axis_gap(first_x1, first_x2, second_x1, second_x2)
+    y_gap = _axis_gap(first_y1, first_y2, second_y1, second_y2)
+    distance_limit = max(1, int(merge_gap) * 2)
+
+    if x_gap > distance_limit or y_gap > distance_limit:
+        return False
+
+    merged = _merged_box(first, second)
+    if merged["width"] > image_width * 0.60:
+        return False
+    if merged["height"] > image_height * 0.45:
+        return False
+    return True
+
+
+def merge_nearby_boxes(
+    boxes: Iterable[dict],
+    merge_gap: int,
+    image_width: int,
+    image_height: int,
+) -> list[dict]:
+    merged_boxes = list(boxes)
+    changed = True
+
+    while changed:
+        changed = False
+        next_boxes: list[dict] = []
+        used = [False] * len(merged_boxes)
+
+        for index, box in enumerate(merged_boxes):
+            if used[index]:
+                continue
+
+            current = box
+            used[index] = True
+            for other_index in range(index + 1, len(merged_boxes)):
+                if used[other_index]:
+                    continue
+                other = merged_boxes[other_index]
+                if _should_merge_boxes(current, other, merge_gap, image_width, image_height):
+                    current = _merged_box(current, other)
+                    used[other_index] = True
+                    changed = True
+
+            next_boxes.append(current)
+
+        merged_boxes = next_boxes
+
+    return merged_boxes
+
+
 def sort_boxes(boxes: Iterable[dict]) -> list[dict]:
     boxes = list(boxes)
     if not boxes:
@@ -116,4 +210,5 @@ def detect_elements(
             )
         )
 
+    boxes = merge_nearby_boxes(boxes, merge_gap, image_width, image_height)
     return sort_boxes(boxes)

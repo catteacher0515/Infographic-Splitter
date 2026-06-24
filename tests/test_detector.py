@@ -34,6 +34,31 @@ def test_filters_small_noise_by_min_area():
     assert boxes[0]["width"] > 80
 
 
+def test_merge_gap_combines_nearby_strokes_into_one_visual_block():
+    image = make_canvas(width=240, height=140)
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((20, 30, 70, 90), outline="black", width=4)
+    draw.rectangle((96, 34, 142, 88), outline="black", width=4)
+
+    boxes = detect_elements(image, min_area=200, merge_gap=18, padding=0)
+
+    assert len(boxes) == 1
+    assert boxes[0]["x"] <= 22
+    assert boxes[0]["width"] >= 118
+
+
+def test_merge_gap_keeps_distant_blocks_separate():
+    image = make_canvas(width=320, height=140)
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((20, 30, 70, 90), outline="black", width=4)
+    draw.rectangle((220, 34, 270, 88), outline="black", width=4)
+
+    boxes = detect_elements(image, min_area=200, merge_gap=18, padding=0)
+
+    assert len(boxes) == 2
+    assert boxes[0]["x"] < boxes[1]["x"]
+
+
 def test_padding_expands_box_and_clamps_to_image_bounds():
     image = make_canvas(width=120, height=100)
     draw = ImageDraw.Draw(image)
