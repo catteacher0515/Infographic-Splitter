@@ -1,6 +1,7 @@
 import pytest
 
 from ai_grouper import (
+    build_grouped_boxes,
     build_grouping_messages,
     extract_json_object,
     parse_grouping_response,
@@ -90,3 +91,37 @@ def test_validate_grouping_response_skips_empty_or_invalid_groups():
     validated = validate_grouping_response(response, sample_candidates())
 
     assert validated["groups"] == []
+
+
+def test_build_grouped_boxes_merges_candidate_bounds():
+    candidates = [
+        {"id": 1, "x": 10, "y": 20, "width": 50, "height": 40},
+        {"id": 2, "x": 70, "y": 30, "width": 30, "height": 60},
+    ]
+    grouping = {
+        "groups": [
+            {
+                "file": "merged.png",
+                "candidate_ids": [1, 2],
+                "type": "illustration",
+                "keep": True,
+                "reason": "one scene",
+            }
+        ]
+    }
+
+    boxes = build_grouped_boxes(grouping, candidates)
+
+    assert boxes == [
+        {
+            "x": 10,
+            "y": 20,
+            "width": 90,
+            "height": 70,
+            "file": "merged.png",
+            "type": "illustration",
+            "selected": True,
+            "source_candidate_ids": [1, 2],
+            "reason": "one scene",
+        }
+    ]

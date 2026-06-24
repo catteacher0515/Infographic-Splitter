@@ -175,3 +175,44 @@ def validate_grouping_response(response: dict, candidates: list[dict]) -> dict:
         "ignored_candidate_ids": ignored_candidate_ids,
         "notes": str(response.get("notes", "")),
     }
+
+
+def build_grouped_boxes(grouping: dict, candidates: list[dict]) -> list[dict]:
+    candidates_by_id = {int(candidate["id"]): candidate for candidate in candidates}
+    boxes = []
+
+    for group in grouping.get("groups", []):
+        source_candidates = [
+            candidates_by_id[candidate_id]
+            for candidate_id in group["candidate_ids"]
+            if candidate_id in candidates_by_id
+        ]
+        if not source_candidates:
+            continue
+
+        x1 = min(int(candidate["x"]) for candidate in source_candidates)
+        y1 = min(int(candidate["y"]) for candidate in source_candidates)
+        x2 = max(
+            int(candidate["x"]) + int(candidate["width"])
+            for candidate in source_candidates
+        )
+        y2 = max(
+            int(candidate["y"]) + int(candidate["height"])
+            for candidate in source_candidates
+        )
+
+        boxes.append(
+            {
+                "x": x1,
+                "y": y1,
+                "width": x2 - x1,
+                "height": y2 - y1,
+                "file": group["file"],
+                "type": group.get("type", "unknown"),
+                "selected": bool(group.get("keep", True)),
+                "source_candidate_ids": list(group["candidate_ids"]),
+                "reason": str(group.get("reason", "")),
+            }
+        )
+
+    return boxes

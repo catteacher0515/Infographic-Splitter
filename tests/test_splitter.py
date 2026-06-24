@@ -38,3 +38,27 @@ def test_create_elements_uses_box_order_for_names(tmp_path: Path):
         "element_002.png",
     ]
     assert [element["x"] for element in elements] == [100, 20]
+
+
+def test_create_elements_uses_custom_file_and_metadata(tmp_path: Path):
+    image = Image.new("RGB", (200, 120), "white")
+    boxes = [
+        {
+            "x": 10,
+            "y": 20,
+            "width": 80,
+            "height": 50,
+            "file": "loop_cycle.png",
+            "type": "illustration",
+            "source_candidate_ids": [1, 2],
+            "reason": "same loop",
+            "selected": False,
+        }
+    ]
+
+    elements = create_elements(image, boxes, tmp_path)
+
+    assert elements[0]["file"] == "loop_cycle.png"
+    assert elements[0]["type"] == "illustration"
+    assert elements[0]["source_candidate_ids"] == [1, 2]
+    assert elements[0]["selected"] is False

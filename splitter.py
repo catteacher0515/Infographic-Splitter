@@ -19,21 +19,23 @@ def create_elements(image: Image.Image, boxes: list[dict], output_dir: str | Pat
 
     elements = []
     for index, box in enumerate(boxes, start=1):
-        filename = f"element_{index:03d}.png"
+        filename = str(box.get("file") or f"element_{index:03d}.png")
         preview_path = assets_dir / filename
         _crop_image(image, box).save(preview_path)
 
-        elements.append(
-            {
-                "id": index,
-                "file": filename,
-                "x": int(box["x"]),
-                "y": int(box["y"]),
-                "width": int(box["width"]),
-                "height": int(box["height"]),
-                "selected": True,
-                "preview_path": str(preview_path),
-            }
-        )
+        element = {
+            "id": index,
+            "file": filename,
+            "x": int(box["x"]),
+            "y": int(box["y"]),
+            "width": int(box["width"]),
+            "height": int(box["height"]),
+            "selected": bool(box.get("selected", True)),
+            "preview_path": str(preview_path),
+        }
+        for key in ("type", "source_candidate_ids", "reason"):
+            if key in box:
+                element[key] = box[key]
+        elements.append(element)
 
     return elements
