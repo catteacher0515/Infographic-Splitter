@@ -77,3 +77,41 @@ def test_run_ai_grouping_returns_error_without_elements(tmp_path: Path):
     assert rows == []
     assert elements == []
     assert "先点击开始拆分" in status
+
+
+def test_run_ai_grouping_uses_grouped_elements_on_success(tmp_path: Path):
+    class FakeVisionClient:
+        def complete(self, messages):
+            return (
+                '{"groups":[{"id":1,"file":"ai_group.png",'
+                '"candidate_ids":[1],"type":"illustration","keep":true,'
+                '"reason":"single grouped element"}],"ignored_candidate_ids":[]}'
+            )
+
+    image = Image.new("RGB", (140, 100), "white")
+    elements = [
+        {
+            "id": 1,
+            "file": "element_001.png",
+            "x": 10,
+            "y": 20,
+            "width": 60,
+            "height": 40,
+            "selected": True,
+            "preview_path": str(tmp_path / "old.png"),
+        }
+    ]
+
+    gallery, rows, grouped, status = run_ai_grouping(
+        image=image,
+        elements=elements,
+        output_root=tmp_path,
+        vision_client=FakeVisionClient(),
+    )
+
+    assert status == "AI 语义合并完成：1 个元素"
+    assert rows[0][1] == "ai_group.png"
+    assert grouped[0]["file"] == "ai_group.png"
+    assert grouped[0]["type"] == "illustration"
+    assert grouped[0]["source_candidate_ids"] == [1]
+    assert len(gallery) == 1

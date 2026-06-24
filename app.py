@@ -117,20 +117,22 @@ def run_ai_grouping(
         parsed = parse_grouping_response(raw_response)
         grouping = validate_grouping_response(parsed, elements)
         grouped_boxes = build_grouped_boxes(grouping, elements)
+        if not grouped_boxes:
+            raise ValueError("模型没有返回可用分组")
         grouped_elements = create_elements(image, grouped_boxes, session_dir)
     except Exception as error:
         return (
             [element["preview_path"] for element in elements],
             elements_to_rows(elements),
             elements,
-            f"AI 语义合并失败：{error}",
+            f"AI 语义合并失败，已保留 OpenCV 结果：{error}",
         )
 
     return (
         [element["preview_path"] for element in grouped_elements],
         elements_to_rows(grouped_elements),
         grouped_elements,
-        "AI 语义合并完成",
+        f"AI 语义合并完成：{len(grouped_elements)} 个元素",
     )
 
 
@@ -141,7 +143,6 @@ def build_app():
         gr.Markdown("# Infographic Splitter")
 
         state_elements = gr.State([])
-        ai_status = gr.Markdown("")
 
         with gr.Row():
             with gr.Column(scale=1):
@@ -151,6 +152,9 @@ def build_app():
                 padding = gr.Slider(0, 40, value=10, step=1, label="padding")
                 split_button = gr.Button("开始拆分", variant="primary")
                 ai_button = gr.Button("AI 语义合并")
+                ai_status = gr.Markdown(
+                    "AI 语义合并会将带编号预览图和候选框 JSON 发送到配置的视觉模型。"
+                )
                 export_button = gr.Button("导出 ZIP")
                 zip_output = gr.File(label="下载 ZIP")
 

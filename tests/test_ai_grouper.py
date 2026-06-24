@@ -32,6 +32,18 @@ def test_build_grouping_messages_includes_rules_and_candidates():
     assert user_content[1]["type"] == "image_url"
 
 
+def test_build_grouping_messages_keeps_labels_separate_from_titles():
+    messages = build_grouping_messages(
+        candidates=sample_candidates(),
+        annotated_image_data_url="data:image/png;base64,abc",
+    )
+
+    text = messages[1]["content"][0]["text"]
+
+    assert "中文说明文字必须作为独立元素" in text
+    assert "不要把标题框和中文说明文字合并" in text
+
+
 def test_extract_json_object_handles_markdown_wrapper():
     text = '```json\n{"groups": [], "ignored_candidate_ids": []}\n```'
 
@@ -91,6 +103,47 @@ def test_validate_grouping_response_skips_empty_or_invalid_groups():
     validated = validate_grouping_response(response, sample_candidates())
 
     assert validated["groups"] == []
+
+
+def test_validate_grouping_response_splits_label_candidates_from_title_groups():
+    candidates = [
+        {
+            "id": 1,
+            "file": "element_001.png",
+            "x": 56,
+            "y": 94,
+            "width": 267,
+            "height": 200,
+        },
+        {
+            "id": 6,
+            "file": "element_006.png",
+            "x": 107,
+            "y": 347,
+            "width": 136,
+            "height": 60,
+        },
+    ]
+    response = {
+        "groups": [
+            {
+                "id": 1,
+                "file": "prompt_element.png",
+                "candidate_ids": [1, 6],
+                "type": "title",
+                "keep": True,
+                "reason": "model overmerged title and label",
+            }
+        ]
+    }
+
+    validated = validate_grouping_response(response, candidates)
+
+    assert [group["candidate_ids"] for group in validated["groups"]] == [[1], [6]]
+    assert validated["groups"][0]["file"] == "prompt_element.png"
+    assert validated["groups"][0]["type"] == "title"
+    assert validated["groups"][1]["file"] == "element_006.png"
+    assert validated["groups"][1]["type"] == "label"
 
 
 def test_build_grouped_boxes_merges_candidate_bounds():
