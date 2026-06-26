@@ -6,6 +6,7 @@ from PIL import Image
 from app import (
     build_session_output_dir,
     rename_images,
+    remove_backgrounds,
     rows_to_downloads,
 )
 
@@ -89,3 +90,15 @@ def test_rename_images_marks_failed_file_when_ai_response_is_invalid(tmp_path: P
     assert rows[0][2] == "failed"
     assert "失败" in rows[0][3]
     assert status == "AI 重命名完成：0 / 1 张图片"
+
+
+def test_remove_backgrounds_returns_error_without_files(tmp_path: Path):
+    downloads, zip_path, rows, status = remove_backgrounds(
+        files=[],
+        output_root=tmp_path,
+    )
+
+    assert downloads == []
+    assert zip_path is None
+    assert rows == []
+    assert "请先上传图片" in status

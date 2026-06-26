@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from PIL import Image
 
+from background_remover import remove_backgrounds
 from annotator import image_to_data_url
 from image_namer import (
     dedupe_name,
@@ -142,40 +143,80 @@ def rename_images(
 def build_app():
     import gradio as gr
 
-    with gr.Blocks(title="Image Renamer") as demo:
-        gr.Markdown("# Image Renamer")
+    with gr.Blocks(title="Image Tools") as demo:
+        gr.Markdown("# Image Tools")
 
-        with gr.Row():
-            with gr.Column(scale=1):
-                files_input = gr.Files(
-                    label="上传图片",
-                    file_count="multiple",
-                    type="filepath",
+        with gr.Tabs():
+            with gr.Tab("中文重命名"):
+                with gr.Row():
+                    with gr.Column(scale=1):
+                        files_input = gr.Files(
+                            label="上传图片",
+                            file_count="multiple",
+                            type="filepath",
+                        )
+                        rename_button = gr.Button("AI 重命名", variant="primary")
+                        rename_status = gr.Markdown("上传图片后，点击 AI 重命名。")
+
+                    with gr.Column(scale=2):
+                        rename_table = gr.Dataframe(
+                            headers=[
+                                "原文件名",
+                                "新文件名",
+                                "状态",
+                                "原因",
+                                "输出路径",
+                            ],
+                            datatype=["str", "str", "str", "str", "str"],
+                            interactive=False,
+                            label="结果",
+                        )
+                        rename_downloads = gr.Files(label="下载副本", interactive=False)
+                        rename_zip_output = gr.File(label="下载 zip")
+
+                rename_button.click(
+                    fn=rename_images,
+                    inputs=[files_input],
+                    outputs=[rename_downloads, rename_zip_output, rename_table, rename_status],
                 )
-                rename_button = gr.Button("AI 重命名", variant="primary")
-                status = gr.Markdown("上传图片后，点击 AI 重命名。")
 
-            with gr.Column(scale=2):
-                table = gr.Dataframe(
-                    headers=[
-                        "原文件名",
-                        "新文件名",
-                        "状态",
-                        "原因",
-                        "输出路径",
+            with gr.Tab("透明背景"):
+                with gr.Row():
+                    with gr.Column(scale=1):
+                        transparent_files_input = gr.Files(
+                            label="上传图片",
+                            file_count="multiple",
+                            type="filepath",
+                        )
+                        transparent_button = gr.Button("去除背景", variant="primary")
+                        transparent_status = gr.Markdown("上传图片后，点击去除背景。")
+
+                    with gr.Column(scale=2):
+                        transparent_table = gr.Dataframe(
+                            headers=[
+                                "原文件名",
+                                "输出文件",
+                                "状态",
+                                "原因",
+                                "输出路径",
+                            ],
+                            datatype=["str", "str", "str", "str", "str"],
+                            interactive=False,
+                            label="结果",
+                        )
+                        transparent_downloads = gr.Files(label="下载副本", interactive=False)
+                        transparent_zip_output = gr.File(label="下载 zip")
+
+                transparent_button.click(
+                    fn=remove_backgrounds,
+                    inputs=[transparent_files_input],
+                    outputs=[
+                        transparent_downloads,
+                        transparent_zip_output,
+                        transparent_table,
+                        transparent_status,
                     ],
-                    datatype=["str", "str", "str", "str", "str"],
-                    interactive=False,
-                    label="结果",
                 )
-                downloads = gr.Files(label="下载副本", interactive=False)
-                zip_output = gr.File(label="下载 zip")
-
-        rename_button.click(
-            fn=rename_images,
-            inputs=[files_input],
-            outputs=[downloads, zip_output, table, status],
-        )
 
     return demo
 
