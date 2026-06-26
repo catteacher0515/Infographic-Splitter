@@ -1,8 +1,13 @@
 from pathlib import Path
+import zipfile
 
-from PIL import Image, ImageDraw
+from PIL import Image
 
-from app import build_session_output_dir, elements_to_rows, run_ai_grouping, run_split
+from app import (
+    build_session_output_dir,
+    rename_images,
+    rows_to_downloads,
+)
 
 
 def test_build_session_output_dir_creates_unique_session(tmp_path: Path):
@@ -14,104 +19,73 @@ def test_build_session_output_dir_creates_unique_session(tmp_path: Path):
     assert second.exists()
 
 
-def test_run_split_returns_gallery_rows_and_elements(tmp_path: Path):
-    image = Image.new("RGB", (240, 160), "white")
-    draw = ImageDraw.Draw(image)
-    draw.rectangle((20, 20, 100, 80), outline="black", width=4)
-
-    gallery, rows, elements = run_split(
-        image,
-        min_area=200,
-        merge_gap=5,
-        padding=0,
-        output_root=tmp_path,
-    )
-
-    assert len(gallery) == 1
-    assert len(rows) == 1
-    assert len(elements) == 1
-    assert rows[0][0] is True
-    assert rows[0][1] == "element_001.png"
-
-
-def test_elements_to_rows_includes_ai_metadata():
-    rows = elements_to_rows(
-        [
-            {
-                "selected": True,
-                "file": "loop_cycle.png",
-                "x": 10,
-                "y": 20,
-                "width": 90,
-                "height": 70,
-                "type": "illustration",
-                "source_candidate_ids": [1, 2],
-                "reason": "same loop",
-            }
-        ]
-    )
-
-    assert rows[0] == [
-        True,
-        "loop_cycle.png",
-        10,
-        20,
-        90,
-        70,
-        "illustration",
-        "1,2",
-        "same loop",
+def test_rows_to_downloads_returns_generated_files():
+    rows = [
+        ["source_a.png", "prompt_card.png", "renamed", "ok", "/tmp/prompt_card.png"],
+        ["source_b.png", "context_scene.png", "renamed", "ok", "/tmp/context_scene.png"],
     ]
 
+    downloads = rows_to_downloads(rows)
 
-def test_run_ai_grouping_returns_error_without_elements(tmp_path: Path):
-    image = Image.new("RGB", (100, 100), "white")
+    assert downloads == ["/tmp/prompt_card.png", "/tmp/context_scene.png"]
 
-    gallery, rows, elements, status = run_ai_grouping(
-        image=image,
-        elements=[],
+
+def test_rename_images_returns_error_without_files(tmp_path: Path):
+    downloads, zip_path, rows, status = rename_images(
+        files=[],
         output_root=tmp_path,
     )
 
-    assert gallery == []
+    assert downloads == []
+    assert zip_path is None
     assert rows == []
-    assert elements == []
-    assert "先点击开始拆分" in status
+    assert "请先上传图片" in status
 
 
-def test_run_ai_grouping_uses_grouped_elements_on_success(tmp_path: Path):
+def test_rename_images_creates_renamed_copies_with_deduped_names(tmp_path: Path):
     class FakeVisionClient:
         def complete(self, messages):
-            return (
-                '{"groups":[{"id":1,"file":"ai_group.png",'
-                '"candidate_ids":[1],"type":"illustration","keep":true,'
-                '"reason":"single grouped element"}],"ignored_candidate_ids":[]}'
-            )
+            return '{"file":"提示卡片.png","reason":"单张提示卡片"}'
 
-    image = Image.new("RGB", (140, 100), "white")
-    elements = [
-        {
-            "id": 1,
-            "file": "element_001.png",
-            "x": 10,
-            "y": 20,
-            "width": 60,
-            "height": 40,
-            "selected": True,
-            "preview_path": str(tmp_path / "old.png"),
-        }
-    ]
+    first = tmp_path / "first.png"
+    second = tmp_path / "second.png"
+    Image.new("RGB", (80, 40), "white").save(first)
+    Image.new("RGB", (80, 40), "white").save(second)
 
-    gallery, rows, grouped, status = run_ai_grouping(
-        image=image,
-        elements=elements,
+    downloads, zip_path, rows, status = rename_images(
+        files=[str(first), str(second)],
         output_root=tmp_path,
         vision_client=FakeVisionClient(),
     )
 
-    assert status == "AI 语义合并完成：1 个元素"
-    assert rows[0][1] == "ai_group.png"
-    assert grouped[0]["file"] == "ai_group.png"
-    assert grouped[0]["type"] == "illustration"
-    assert grouped[0]["source_candidate_ids"] == [1]
-    assert len(gallery) == 1
+    assert status == "AI 重命名完成：2 张图片"
+    assert [row[1] for row in rows] == ["提示卡片.png", "提示卡片_2.png"]
+    assert [Path(path).name for path in downloads] == ["提示卡片.png", "提示卡片_2.png"]
+    assert all(Path(path).exists() for path in downloads)
+    assert zip_path is not None
+    assert Path(zip_path).exists()
+    with zipfile.ZipFile(zip_path) as archive:
+        assert sorted(archive.namelist()) == ["提示卡片.png", "提示卡片_2.png"]
+    assert rows[0][2] == "renamed"
+
+
+def test_rename_images_marks_failed_file_when_ai_response_is_invalid(tmp_path: Path):
+    class FakeVisionClient:
+        def complete(self, messages):
+            return "not json"
+
+    image_path = tmp_path / "single.png"
+    Image.new("RGB", (80, 40), "white").save(image_path)
+
+    downloads, zip_path, rows, status = rename_images(
+        files=[str(image_path)],
+        output_root=tmp_path,
+        vision_client=FakeVisionClient(),
+    )
+
+    assert downloads == []
+    assert zip_path is None
+    assert rows[0][0] == "single.png"
+    assert rows[0][2] == "failed"
+    assert "失败" in rows[0][3]
+    assert status == "AI 重命名完成：0 / 1 张图片"

@@ -1,20 +1,19 @@
 from __future__ import annotations
 
+import shutil
+import zipfile
 from pathlib import Path
 from uuid import uuid4
 
 from PIL import Image
 
-from ai_grouper import (
-    build_grouped_boxes,
-    build_grouping_messages,
-    parse_grouping_response,
-    validate_grouping_response,
+from annotator import image_to_data_url
+from image_namer import (
+    dedupe_name,
+    build_naming_messages,
+    parse_naming_response,
+    sanitize_copy_name,
 )
-from annotator import image_to_data_url, save_annotated_candidates
-from detector import detect_elements
-from exporter import export_zip
-from splitter import create_elements
 from vision_client import QwenVisionClient
 
 
@@ -27,180 +26,155 @@ def build_session_output_dir(output_root: str | Path = OUTPUT_ROOT) -> Path:
     return session_dir
 
 
-def elements_to_rows(elements: list[dict]) -> list[list]:
-    return [
-        [
-            bool(element.get("selected", True)),
-            element["file"],
-            element["x"],
-            element["y"],
-            element["width"],
-            element["height"],
-            element.get("type", ""),
-            ",".join(str(item) for item in element.get("source_candidate_ids", [])),
-            element.get("reason", ""),
-        ]
-        for element in elements
-    ]
-
-
-def rows_to_elements(rows, elements: list[dict]) -> list[dict]:
+def rows_to_downloads(rows) -> list[str]:
     if hasattr(rows, "values"):
         rows = rows.values.tolist()
-
-    updated = []
-    for row, element in zip(rows, elements):
-        selected, filename, *_ = row
-        copied = dict(element)
-        copied["selected"] = bool(selected)
-        copied["file"] = str(filename)
-        updated.append(copied)
-    return updated
+    return [str(row[4]) for row in rows if len(row) > 4 and row[2] == "renamed"]
 
 
-def run_split(
-    image: Image.Image,
-    min_area: int = 500,
-    merge_gap: int = 8,
-    padding: int = 10,
-    output_root: str | Path = OUTPUT_ROOT,
-) -> tuple[list[str], list[list], list[dict]]:
-    if image is None:
-        return [], [], []
-
-    session_dir = build_session_output_dir(output_root)
-    boxes = detect_elements(
-        image,
-        min_area=int(min_area),
-        merge_gap=int(merge_gap),
-        padding=int(padding),
-    )
-    elements = create_elements(image, boxes, session_dir)
-    gallery = [element["preview_path"] for element in elements]
-    return gallery, elements_to_rows(elements), elements
+def _normalize_files(files) -> list[str]:
+    if not files:
+        return []
+    if hasattr(files, "tolist"):
+        files = files.tolist()
+    normalized = []
+    for item in files:
+        if isinstance(item, dict) and "name" in item:
+            normalized.append(str(item["name"]))
+        elif isinstance(item, dict) and "path" in item:
+            normalized.append(str(item["path"]))
+        else:
+            normalized.append(str(item))
+    return normalized
 
 
-def run_export(rows, elements: list[dict], output_root: str | Path = OUTPUT_ROOT) -> str | None:
-    if not elements:
+def _copy_with_renamed_file(source_path: Path, destination_dir: Path, filename: str) -> Path:
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    destination_path = destination_dir / filename
+    shutil.copy2(source_path, destination_path)
+    return destination_path
+
+
+def _zip_renamed_files(file_paths: list[str], output_dir: Path) -> str | None:
+    if not file_paths:
         return None
 
-    session_dir = build_session_output_dir(output_root)
-    updated_elements = rows_to_elements(rows, elements)
-    return export_zip(updated_elements, session_dir)
+    zip_path = output_dir / "renamed_images.zip"
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for file_path in file_paths:
+            archive.write(file_path, arcname=Path(file_path).name)
+    return str(zip_path)
 
 
-def run_ai_grouping(
-    image: Image.Image,
-    elements: list[dict],
+def _rename_one(
+    file_path: Path,
+    output_dir: Path,
+    vision_client: QwenVisionClient,
+) -> dict:
+    try:
+        with Image.open(file_path) as image:
+            image.verify()
+        messages = build_naming_messages(image_to_data_url(file_path))
+        raw_response = vision_client.complete(messages)
+        parsed = parse_naming_response(raw_response)
+        proposed_name = sanitize_copy_name(parsed["file"], file_path)
+        return {
+            "source_file": file_path.name,
+            "file": proposed_name,
+            "status": "renamed",
+            "output_path": "",
+            "reason": parsed["reason"],
+        }
+    except Exception as error:
+        return {
+            "source_file": file_path.name,
+            "file": file_path.name,
+            "status": "failed",
+            "output_path": "",
+            "reason": f"失败：{error}",
+        }
+
+
+def rename_images(
+    files,
     output_root: str | Path = OUTPUT_ROOT,
     vision_client: QwenVisionClient | None = None,
-) -> tuple[list[str], list[list], list[dict], str]:
-    if image is None:
-        return [], [], [], "请先上传图片"
-    if not elements:
-        return [], [], [], "请先点击开始拆分"
+) -> tuple[list[str], str | None, list[list], str]:
+    file_paths = [Path(path) for path in _normalize_files(files)]
+    if not file_paths:
+        return [], None, [], "请先上传图片"
 
     session_dir = build_session_output_dir(output_root)
-    annotated_path = save_annotated_candidates(
-        image,
-        elements,
-        session_dir / "annotated_candidates.png",
-    )
-    messages = build_grouping_messages(
-        candidates=elements,
-        annotated_image_data_url=image_to_data_url(annotated_path),
-    )
+    renamed_dir = session_dir / "renamed"
+    client = vision_client or QwenVisionClient()
 
-    try:
-        client = vision_client or QwenVisionClient()
-        raw_response = client.complete(messages)
-        parsed = parse_grouping_response(raw_response)
-        grouping = validate_grouping_response(parsed, elements)
-        grouped_boxes = build_grouped_boxes(grouping, elements)
-        if not grouped_boxes:
-            raise ValueError("模型没有返回可用分组")
-        grouped_elements = create_elements(image, grouped_boxes, session_dir)
-    except Exception as error:
-        return (
-            [element["preview_path"] for element in elements],
-            elements_to_rows(elements),
-            elements,
-            f"AI 语义合并失败，已保留 OpenCV 结果：{error}",
+    rows = []
+    downloads = []
+    used_names: set[str] = set()
+
+    for file_path in file_paths:
+        result = _rename_one(file_path, renamed_dir, client)
+        if result["status"] == "renamed":
+            result["file"] = dedupe_name(result["file"], used_names)
+            result["output_path"] = str(
+                _copy_with_renamed_file(file_path, renamed_dir, result["file"])
+            )
+            downloads.append(result["output_path"])
+        rows.append(
+            [
+                result["source_file"],
+                result["file"],
+                result["status"],
+                result["reason"],
+                result["output_path"],
+            ]
         )
 
-    return (
-        [element["preview_path"] for element in grouped_elements],
-        elements_to_rows(grouped_elements),
-        grouped_elements,
-        f"AI 语义合并完成：{len(grouped_elements)} 个元素",
-    )
+    renamed_count = sum(1 for row in rows if row[2] == "renamed")
+    if renamed_count == len(rows):
+        status = f"AI 重命名完成：{renamed_count} 张图片"
+    else:
+        status = f"AI 重命名完成：{renamed_count} / {len(rows)} 张图片"
+    zip_path = _zip_renamed_files(downloads, session_dir)
+    return downloads, zip_path, rows, status
 
 
 def build_app():
     import gradio as gr
 
-    with gr.Blocks(title="Infographic Splitter") as demo:
-        gr.Markdown("# Infographic Splitter")
-
-        state_elements = gr.State([])
+    with gr.Blocks(title="Image Renamer") as demo:
+        gr.Markdown("# Image Renamer")
 
         with gr.Row():
             with gr.Column(scale=1):
-                image_input = gr.Image(type="pil", label="上传图片")
-                min_area = gr.Number(value=500, precision=0, label="min_area")
-                merge_gap = gr.Slider(1, 40, value=8, step=1, label="merge_gap")
-                padding = gr.Slider(0, 40, value=10, step=1, label="padding")
-                split_button = gr.Button("开始拆分", variant="primary")
-                ai_button = gr.Button("AI 语义合并")
-                ai_status = gr.Markdown(
-                    "AI 语义合并会将带编号预览图和候选框 JSON 发送到配置的视觉模型。"
+                files_input = gr.Files(
+                    label="上传图片",
+                    file_count="multiple",
+                    type="filepath",
                 )
-                export_button = gr.Button("导出 ZIP")
-                zip_output = gr.File(label="下载 ZIP")
+                rename_button = gr.Button("AI 重命名", variant="primary")
+                status = gr.Markdown("上传图片后，点击 AI 重命名。")
 
             with gr.Column(scale=2):
-                gallery = gr.Gallery(label="拆分结果", columns=4, height=360)
                 table = gr.Dataframe(
                     headers=[
-                        "selected",
-                        "file",
-                        "x",
-                        "y",
-                        "width",
-                        "height",
-                        "type",
-                        "source_candidate_ids",
-                        "reason",
+                        "原文件名",
+                        "新文件名",
+                        "状态",
+                        "原因",
+                        "输出路径",
                     ],
-                    datatype=[
-                        "bool",
-                        "str",
-                        "number",
-                        "number",
-                        "number",
-                        "number",
-                        "str",
-                        "str",
-                        "str",
-                    ],
-                    interactive=True,
-                    label="元素列表",
+                    datatype=["str", "str", "str", "str", "str"],
+                    interactive=False,
+                    label="结果",
                 )
+                downloads = gr.Files(label="下载副本", interactive=False)
+                zip_output = gr.File(label="下载 zip")
 
-        split_button.click(
-            fn=run_split,
-            inputs=[image_input, min_area, merge_gap, padding],
-            outputs=[gallery, table, state_elements],
-        )
-        ai_button.click(
-            fn=run_ai_grouping,
-            inputs=[image_input, state_elements],
-            outputs=[gallery, table, state_elements, ai_status],
-        )
-        export_button.click(
-            fn=run_export,
-            inputs=[table, state_elements],
-            outputs=[zip_output],
+        rename_button.click(
+            fn=rename_images,
+            inputs=[files_input],
+            outputs=[downloads, zip_output, table, status],
         )
 
     return demo
