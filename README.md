@@ -1,8 +1,8 @@
 # Image Tools
 
-Batch upload images, let an AI model generate clearer Chinese filenames, and remove image backgrounds with `rembg`.
+批量上传图片，使用 AI 生成更清晰的中文文件名，并通过 `rembg` 去除图片背景。
 
-## Install
+## 安装
 
 ```bash
 python -m venv .venv
@@ -10,43 +10,43 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-`requirements.txt` installs `rembg[cpu]`, which includes the ONNX runtime needed for transparent background removal on local machines and on Render.
+`requirements.txt` 中使用的是 `rembg[cpu]`，它会安装透明背景功能所需的 ONNX Runtime，适用于本地环境和 Render。
 
-## Run
+## 运行
 
 ```bash
 export DASHSCOPE_API_KEY="your-api-key"
 python app.py
 ```
 
-The app reads `PORT` and `GRADIO_SERVER_NAME` from the environment, so it can run locally and on hosted platforms like Render.
+应用会从环境变量中读取 `PORT` 和 `GRADIO_SERVER_NAME`，因此既可以本地运行，也可以部署到 Render 这类托管平台。
 
-## Deploy To Render
+## 部署到 Render
 
-1. Push this repository to GitHub.
-2. In Render, create a new `Blueprint` service from the repo.
-3. Render will read [render.yaml](</Users/huapingyu/dev/Infographic Splitter/render.yaml>).
-4. Set the secret env var `DASHSCOPE_API_KEY` in Render.
-5. Deploy the service.
+1. 将此仓库推送到 GitHub。
+2. 在 Render 中基于该仓库创建一个 `Blueprint` 服务。
+3. Render 会自动读取 [render.yaml](</Users/huapingyu/dev/Infographic Splitter/render.yaml>)。
+4. 在 Render 中配置密钥环境变量 `DASHSCOPE_API_KEY`。
+5. 执行部署。
 
-Notes:
-- Render provides the `PORT` value automatically.
-- `GRADIO_SERVER_NAME` is set to `0.0.0.0` in `render.yaml`.
-- `rembg[cpu]` is installed through `requirements.txt`, so Render has the ONNX runtime required by the transparent background tab.
-- The `output/` directory is ephemeral on Render, so generated files are only suitable for per-session download, not long-term storage.
+说明：
+- Render 会自动提供 `PORT` 环境变量。
+- `render.yaml` 中已将 `GRADIO_SERVER_NAME` 设为 `0.0.0.0`。
+- `requirements.txt` 中的 `rembg[cpu]` 会为透明背景功能安装所需的 ONNX Runtime。
+- Render 上的 `output/` 目录是临时存储，只适合当前会话下载，不适合长期保存生成文件。
 
-## Workflow
+## 使用流程
 
 ```text
-Tab 1: Upload multiple images -> AI generates Chinese names -> Download renamed copies / zip
-Tab 2: Upload multiple images -> Remove backgrounds -> Download transparent copies / zip
+标签页 1：上传多张图片 -> AI 生成中文文件名 -> 下载重命名后的副本或 zip
+标签页 2：上传多张图片 -> 去除背景 -> 下载透明背景副本或 zip
 ```
 
-## Notes
+## 注意事项
 
-- The original files are not modified.
-- New copies are written to an `output/session-*/renamed/` directory.
-- The zip file contains only the renamed images.
-- If multiple images get the same name, the app appends `_2`, `_3`, and so on.
-- Transparent PNG copies are written to an `output/session-*/transparent/` directory.
-- The transparent zip file contains only the processed PNG images.
+- 原始文件不会被修改。
+- 新副本会写入 `output/session-*/renamed/` 目录。
+- zip 文件中只包含重命名后的图片。
+- 如果多张图片生成了相同文件名，程序会自动追加 `_2`、`_3` 等后缀。
+- 透明背景 PNG 会写入 `output/session-*/transparent/` 目录。
+- 透明背景 zip 中只包含处理后的 PNG 图片。
