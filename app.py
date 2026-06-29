@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import zipfile
 from pathlib import Path
@@ -221,5 +222,11 @@ def build_app():
     return demo
 
 
+def launch_app():
+    server_name = os.getenv("GRADIO_SERVER_NAME", "127.0.0.1")
+    server_port = int(os.getenv("PORT", os.getenv("GRADIO_SERVER_PORT", "7860")))
+    build_app().launch(server_name=server_name, server_port=server_port)
+
+
 if __name__ == "__main__":
-    build_app().launch()
+    launch_app()

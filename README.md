@@ -17,6 +17,21 @@ export DASHSCOPE_API_KEY="your-api-key"
 python app.py
 ```
 
+The app reads `PORT` and `GRADIO_SERVER_NAME` from the environment, so it can run locally and on hosted platforms like Render.
+
+## Deploy To Render
+
+1. Push this repository to GitHub.
+2. In Render, create a new `Blueprint` service from the repo.
+3. Render will read [render.yaml](</Users/huapingyu/dev/Infographic Splitter/render.yaml>).
+4. Set the secret env var `DASHSCOPE_API_KEY` in Render.
+5. Deploy the service.
+
+Notes:
+- Render provides the `PORT` value automatically.
+- `GRADIO_SERVER_NAME` is set to `0.0.0.0` in `render.yaml`.
+- The `output/` directory is ephemeral on Render, so generated files are only suitable for per-session download, not long-term storage.
+
 ## Workflow
 
 ```text
