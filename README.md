@@ -10,6 +10,8 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+`requirements.txt` installs `rembg[cpu]`, which includes the ONNX runtime needed for transparent background removal on local machines and on Render.
+
 ## Run
 
 ```bash
@@ -30,6 +32,7 @@ The app reads `PORT` and `GRADIO_SERVER_NAME` from the environment, so it can ru
 Notes:
 - Render provides the `PORT` value automatically.
 - `GRADIO_SERVER_NAME` is set to `0.0.0.0` in `render.yaml`.
+- `rembg[cpu]` is installed through `requirements.txt`, so Render has the ONNX runtime required by the transparent background tab.
 - The `output/` directory is ephemeral on Render, so generated files are only suitable for per-session download, not long-term storage.
 
 ## Workflow
