@@ -3,4 +3,4 @@ pillow
 gradio
 pytest
 openai
-rembg
+rembg[cpu]
